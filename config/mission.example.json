@@ -1,0 +1,20 @@
+{
+  "_comment": "Mission objective and safety limits set by the team BEFORE an assessed run. Copy to config/mission.json and edit pilots. No secrets here: passwords live in the OS keyring, the Groq key in the GROQ_API_KEY environment variable.",
+  "pilots": ["Prac-Ahmed1"],
+  "workers": {"resource": "http://127.0.0.1:9101", "trading": "http://127.0.0.1:9102"},
+  "station_poi": "grand_exchange",
+  "belt_poi": "commerce_fields",
+  "targets_per_pilot": {"credits_earned": 1000, "ore_mined": 15, "sales": 1},
+  "limits": {
+    "max_spend_total_per_pilot": 700,
+    "max_spend_per_task": 120,
+    "max_cycles_per_mine_task": 20,
+    "min_fuel": 40,
+    "max_active_missions": 2,
+    "min_sell_price": 1
+  },
+  "freshness_seconds": {"status": 90, "active_missions": 300, "missions_board": 1800, "market": 600},
+  "wait_seconds_when_belt_empty": 300,
+  "idle_seconds": 30,
+  "llm": {"enabled": true, "max_calls_per_run": 60}
+}
