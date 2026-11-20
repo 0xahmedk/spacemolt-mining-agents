@@ -129,3 +129,49 @@ def parse_mission_ids(text: str) -> list[dict]:
                          'reward_credits': _int(reward.group(1)) if reward else 0,
                          'objectives': objectives, 'progress': progress})
     return missions
+
+
+def parse_poi(text: str) -> dict:
+    """get_poi: 'POI: Commerce Fields (commerce_fields) | Type: asteroid_belt (metallic)' + Resources table.
+
+    Works docked (the station POI) and undocked, so it is how agents learn where they are.
+    """
+    out: dict = {'id': None, 'name': None, 'type': None, 'station_base_id': None,
+                 'resources': parse_resources(text)}
+    if m := re.search(r'^POI: (.+?) \(([a-z0-9_]+)\) \| Type: ([a-z_]+)', text or '', re.M):
+        out.update(name=m.group(1), id=m.group(2), type=m.group(3))
+    if m := re.search(r'^Station: .+? \(([a-z0-9_]+)\)', text or '', re.M):
+        out['station_base_id'] = m.group(1)
+    return out
+
+
+def _cr(value: str) -> int | None:
+    m = re.search(r'([\d,]+)\s*cr', value or '')
+    return _int(m.group(1)) if m else None
+
+
+def parse_market(text: str) -> list[dict]:
+    """view_market summary table -> [{'item_id', 'best_sell', 'best_buy', 'sell_qty', 'buy_qty', ...}].
+
+    best_sell = cheapest ask (what we would PAY), best_buy = highest bid (what an instant `sell` GETS).
+    None means there is no order on that side.
+    """
+    rows = []
+    for r in parse_table(text, 'Market summary'):
+        if not r.get('item_id'):
+            continue
+        rows.append({'category': r.get('category'), 'item_id': r['item_id'], 'item_name': r.get('item_name'),
+                     'best_sell': _cr(r.get('best_sell', '')), 'best_buy': _cr(r.get('best_buy', '')),
+                     'sell_qty': _int(r.get('sell_qty') or '0') or 0, 'buy_qty': _int(r.get('buy_qty') or '0') or 0})
+    return rows
+
+
+def parse_order_id(text: str) -> str | None:
+    """'... Order ID: 7c21ba3d764107c94d4072256a046b97.' -> the id."""
+    m = re.search(r'Order ID: ([0-9a-f]{8,})', text or '')
+    return m.group(1) if m else None
+
+
+def item_id_from_name(name: str) -> str:
+    """'Iron Ore' -> 'iron_ore' (cargo tables show names; actions want ids)."""
+    return re.sub(r'[^a-z0-9]+', '_', (name or '').lower()).strip('_')

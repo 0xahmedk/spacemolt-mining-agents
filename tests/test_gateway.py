@@ -76,7 +76,11 @@ async def scenario(tmp: Path):
         before = game.session_counter
         await gw.act('spacemolt', 'sell', {'id': 'copper_ore', 'quantity': 1}, idempotency_key='m2:sell')
         assert game.session_counter == before + 1 and game.cargo == 14 and sells(game) == 2
-        print('[PASS] expired session recovered by re-login')
+        game.expire_session_once, game.expire_code = True, 'not_authenticated'   # what the live server sends
+        before = game.session_counter
+        await gw.query('spacemolt', 'get_status')
+        assert game.session_counter == before + 1
+        print('[PASS] expired session recovered by re-login (session_invalid and not_authenticated)')
 
         # 6. rate limit -> wait retry_after -> retry
         game.rate_limit_once = True

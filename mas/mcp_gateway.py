@@ -49,7 +49,9 @@ TOOLS_WITHOUT_ACTION = {'spacemolt_catalog'}
 
 # Error codes meaning "not applied, try again shortly".
 RETRY_LATER_HINTS = ('rate', 'cooldown', 'retry', 'in_transit', 'busy', 'tick')
-SESSION_CODES = {'session_invalid', 'session_required', 'session_expired', 'not_logged_in'}
+# 'not_authenticated' is what the live server returned after ~30 min idle (2026-11-20);
+# the docs overview lists session_required / session_invalid / not_authenticated.
+SESSION_CODES = {'session_invalid', 'session_required', 'session_expired', 'not_logged_in', 'not_authenticated'}
 AUTH_PARAMS = {'session_id', 'password', 'registration_code', 'token'}
 
 def _transport_errors() -> tuple[type[BaseException], ...]:
@@ -159,7 +161,8 @@ class GameGateway:
     def __init__(self, pilot: str, *, agent: str, db=None,
                  connector: Connector = default_connector,
                  password_provider: Callable[[str], str | None] = secrets_store.get_password,
-                 call_timeout: float = 45.0, max_retries: int = 3,
+                 call_timeout: float = 120.0, max_retries: int = 3,  # travel replies take ~40 s
+                 min_mutation_interval: float = TICK_SECONDS + 0.5,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
                  log_path: str | None = None):
         self.pilot, self.agent = pilot, agent
@@ -172,6 +175,8 @@ class GameGateway:
         self.session_id: str | None = None
         self.schemas: dict[str, dict] = {}
         self._lock = asyncio.Lock()  # one game call at a time per pilot (game allows 1 action/tick)
+        self.min_mutation_interval = min_mutation_interval
+        self._last_mutation = 0.0     # monotonic time of the last state-changing call
 
     # ---------------------------------------------------------------- lifecycle
     async def __aenter__(self):
@@ -251,6 +256,13 @@ class GameGateway:
             raise AmbiguousOutcome(idempotency_key, f'previous attempt is {rec.status}; re-observe and resolve')
 
         for attempt in range(1, self.max_retries + 1):
+            # Pace mutations: the game accepts one per tick per pilot.
+            gap = self.min_mutation_interval - (time.monotonic() - self._last_mutation)
+            if gap > 0:
+                await self._sleep(gap)
+            # Measure the interval from when the call STARTS: the server itself holds a mutation
+            # until the tick resolves (~10 s), so timing from the reply would double each cycle.
+            self._last_mutation = time.monotonic()
             try:
                 result = await self._send(tool, action, payload, task_id=task_id, key=idempotency_key)
                 self.ledger.finish(idempotency_key, 'confirmed', result_text=result.text)

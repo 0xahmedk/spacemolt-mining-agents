@@ -12,6 +12,10 @@ SCHEMAS = {
     'spacemolt': {'type': 'object', 'required': ['session_id', 'action'], 'properties': {
         'action': {'type': 'string'}, 'id': {'type': 'string'}, 'quantity': {'type': 'integer'},
         'text': {'type': 'string'}, 'session_id': {'type': 'string'}}},
+    'spacemolt_market': {'type': 'object', 'required': ['session_id', 'action'], 'properties': {
+        'action': {'type': 'string'}, 'item_id': {'type': 'string'}, 'quantity': {'type': 'integer'},
+        'price_each': {'type': 'integer'}, 'category': {'type': 'string'}, 'order_id': {'type': 'string'},
+        'session_id': {'type': 'string'}}},
     'spacemolt_catalog': {'type': 'object', 'required': ['type'], 'properties': {
         'type': {'type': 'string', 'enum': ['ships', 'items']}, 'id': {'type': 'string'},
         'session_id': {'type': 'string'}}},
@@ -37,6 +41,7 @@ class FakeGame:
     calls: list = field(default_factory=list)  # every request received (incl. rejected ones)
     sales_applied: int = 0                     # sells the server actually executed
     expire_session_once: bool = False
+    expire_code: str = 'session_invalid'
     rate_limit_once: bool = False
     timeout_next_mutation: bool = False      # simulate network drop AFTER the server applied it
     connections: int = 0
@@ -57,7 +62,7 @@ class FakeGame:
         if self.expire_session_once:
             self.expire_session_once = False
             self.valid_session = None
-            return _result('Error: session_invalid: Your session has expired.', True)
+            return _result(f'Error: {self.expire_code}: Your session has expired.', True)
         if self.rate_limit_once:
             self.rate_limit_once = False
             return _result('Error: rate_limited: one action per tick. retry_after: 3', True)
@@ -87,6 +92,11 @@ class FakeSession:
 
     async def call_tool(self, name, args):
         await asyncio.sleep(0)
+        timeout_action = getattr(self.game, 'timeout_action', None)
+        if timeout_action and timeout_action == args.get('action'):
+            self.game.timeout_action = None
+            self.game.handle(name, args)          # server applied it...
+            raise asyncio.TimeoutError()          # ...but we never saw the reply
         if self.game.timeout_next_mutation and args.get('action') not in ('login', 'get_status'):
             self.game.timeout_next_mutation = False
             self.game.handle(name, args)          # server applied it...

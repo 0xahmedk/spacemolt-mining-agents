@@ -22,6 +22,9 @@ EXTRA_PARAMS: dict[tuple[str, str], dict[str, str]] = {
     ('spacemolt', 'get_guide'): {'guide': 'string'},    # confirmed 2026-11-20
     ('spacemolt', 'accept_mission'): {'template_id': 'string'},  # docs server contract 2026-11-20
     ('spacemolt', 'sell'): {'auto_list': 'boolean'},    # docs server contract 2026-11-20
+    # view_market's filters are not in the published spacemolt_market schema (worker run 2026-11-20
+    # was blocked locally); the docs server contract lists them.
+    ('spacemolt_market', 'view_market'): {'category': 'string', 'since': 'integer'},
 }
 
 # (tool, action) -> params the server rejects even though the shared schema lists them.
