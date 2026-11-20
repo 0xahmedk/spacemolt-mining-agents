@@ -123,6 +123,18 @@ visited. Nebula space around Haven: haven → **market_prime** (5 POIs) → carg
 "Gold Run Extraction Hub" — likely mining) ; haven → **traders_rest** (5) → factory_belt (4) / khambalia (7).
 Jump distance Haven→market_prime is 407 GU; 🔲 how many AU/fuel a jump costs (use `find_route`).
 
+### First live worker run (Phase 4, 2026-11-20)
+- status / mine / return_to_station worked over A2A with the practice pilot.
+- `travel` grand_exchange ↔ commerce_fields takes **~40–50 s** and 1 fuel each way.
+- A `mine` call itself blocks ~10 s (until the tick resolves); with pacing measured from the reply,
+  cycles took ~21 s → pacing now measured from call start (target ≈ 11 s per cycle).
+- Commerce Fields refilled: Iron 7, Copper 10, Nickel 1, Silicon 0, Trade Crystal 57 (≈30 min after it was
+  emptied). Draws still favour Trade Crystal/Iron over Copper at Mining skill 0.
+- `view_market {category}` was blocked by our own validator (not in published schema) → added to action_params.
+
+- ⚠️ **Idle session expiry returns `not_authenticated`** ("You must login first"), not `session_invalid`
+  (seen 2026-11-20 after the workers idled > 30 min). Gateway now re-logs in on both.
+
 ### Docs MCP server — authoritative contracts (queried 2026-11-20, server v0.728.0)
 `https://game.spacemolt.com/mcp/docs` (read-only). Saved contracts + guides: [api_contracts/](api_contracts/).
 - **Exact params** (MCP: `tools/call spacemolt {action, session_id, ...}`):

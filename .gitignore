@@ -9,3 +9,4 @@ credentials*
 logs/*.jsonl
 logs/*.db
 .secrets/
+config/mission.json

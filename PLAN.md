@@ -102,61 +102,69 @@ Goal: know the exact action names, params and response shapes before automating.
 
 ### Phase 4 — A2A worker services (Day 3, ~5 h) — *split: A = Resource, B = Trading*
 Start from `examples/a2a_worker.py`; replace `acknowledged_only` with real execution.
-- [ ] Task payload = JSON `{mission_id, pilot, skill, params, constraints, deadline}`; reject malformed input.
-- [ ] Persist A2A task id ↔ mission id; emit `WORKING` updates; final artifact = JSON result with **game evidence**
-      (before/after cargo, credits, server message).
-- [ ] **Resource agent skills:** `survey` (POIs with resources in system), `mine(target_qty, max_ticks)`,
-      `return_and_dock`. Safety: fuel ≥ reserve, cargo not full, hull ok.
-- [ ] **Trading/Logistics skills:** `scout_market(items)`, `sell(item, qty, min_price)`, `refuel`,
-      `explore(adjacent_system)` (for Systems Explored), `missions` (accept/complete supply missions if available).
-- [ ] Restart safety: on start, scan `a2a_tasks` in `in_progress` for this role → reconcile with live game state
-      → resume or mark failed. No action re-executed if its idempotency key is confirmed.
-- [ ] Agent cards with real skill descriptions.
+- [x] Task protocol `mas/a2a_protocol.py`: JSON `{task_id, mission_id, skill, pilot, params, constraints,
+      issued_by, rationale}` → JSON `TaskResult {status, summary, data, evidence, error}`; malformed → rejected.
+- [x] Worker framework `mas/worker.py`: validate → task-level dedupe → pilot lease → skill → store result →
+      A2A artifact. `WORKING` progress updates. Startup recovery marks orphaned tasks `unknown`.
+- [x] Duplicate protection: goods/money actions use `<task_id>:<step>` ledger keys (+ checkpoint/verify to
+      reconcile lost replies); navigation converges on observed state.
+- [x] **Resource skills** (`mas/resource_skills.py`): status, survey, go_to, return_to_station,
+      mine (stops: target_reached / max_cycles / cargo_full / belt_depleted / game_error).
+- [x] **Trading skills** (`mas/trading_skills.py`): status, market, sell (min_price), list_sell_order,
+      buy_order (max_spend required), missions_board, active_missions, accept_mission (refuses smuggling/combat),
+      complete_mission, refuel (max_spend). Exploration jumps dropped: home system already counts as explored.
+- [x] Coordinator-side client `mas/a2a_client.py` (non-blocking send + poll) and manual `mas/send_task.py`.
+- [x] Agent cards list the real skills. Offline tests `tests/test_workers.py` (fake world + A2A over ASGI).
+- [x] Live test with practice pilot: status / mine / return_to_station over A2A (crash drill moved to Phase 6).
+
 
 ### Phase 5 — Coordinator (Day 3–4, ~5 h) — *Member A owns logic, B owns LLM prompt/budget*
-`mas/coordinator.py` — loop: **observe → decide → delegate → verify → record**.
-- [ ] Observe: fresh `get_status` for both pilots + latest market snapshot (reject if older than N min).
-- [ ] Decide:
-  - deterministic rules first (fuel low → refuel; cargo full → sell; both stats goals met → stop/idle);
-  - LLM only for real choices: which belt/ore, sell now vs. other station, accept which mission, recovery
-    after repeated failure. Compact JSON prompt (~1.5k tokens), JSON output, validated against a schema;
-    invalid → deterministic fallback.
-- [ ] Budget guard: ≤2 LLM req/min, ≤300 total, ≤250k tokens — target **≤120 calls / ≤120k tokens** for all
-      assessed runs. Every call logged with rationale.
-- [ ] Delegate via A2A client to the right worker; handle worker missing (card fetch fails) → mark, retry later,
-      or reassign.
-- [ ] Verify result against a new observation (credits/cargo actually changed) before marking `done`.
-- [ ] Hard safety limits from config: max spend, max AU, no combat, no transfers between pilots.
+`mas/coordinator.py` — loop per pilot: **observe → options → decide → delegate → verify**.
+- [~] Observe: fresh observations from the shared store; stale → delegate a read task (status / active_missions /
+      missions_board / market). Mission progress is always re-read after acting (no stale plans).
+- [~] Options: deterministic, validated menu (complete finished mission, mine for a mission, accept feasible safe
+      mission, buy/sell order a market mission needs, sell into a bid, generic mining, wait, return). Spend caps,
+      unsafe missions and options that failed twice are filtered out before the LLM sees them.
+- [~] Decide: forced rules (claim finished mission, refuel when low) → LLM picks ONE option id + rationale
+      (`mas/llm.py`, JSON) → reuse the last LLM plan while the menu is unchanged → heuristic fallback.
+- [~] Budget: starter ledger `scripts/budget.py` (300 req / 250k tok / 2 per min, waits out the minute window),
+      per-run cap `llm.max_calls_per_run`. Every call logged (purpose, tokens, response).
+- [~] Delegate over A2A (`A2ADispatcher`); worker unreachable → task `unknown`, retried via recovery.
+- [~] Verify worker evidence before closing a mission (credits/cargo deltas, order ids, docked state).
+- [~] Restart: resend unfinished tasks with the same id; adopt stored results of finished-but-unreported tasks.
+- [~] Config `config/mission.example.json` (targets, limits). Offline tests `tests/test_coordinator.py`.
+- [ ] Live run with the practice pilot.
 
-### Phase 6 — Practice runs on practice pilots (Day 4–5) — *both*
-- [ ] Full loop on practice pilot: mine → dock → sell → see credits rise.
-- [ ] Failure drills: kill a worker mid-mine; kill coordinator mid-sell; expire session; give invalid params;
-      stale market. Each must recover without double-selling. Save the logs as evidence.
-- [ ] Measure: credits/hour, ore/hour, AU per cycle, LLM calls per cycle → project whether targets fit in 8 h.
-- [ ] Tune strategy (which ore sells best, nearest station, missions vs. raw selling).
+`[~]` = code written, waiting for your test run.
 
-### Phase 7 — Baseline (Day 5, ~2 h) — *Member B owns*
-- [ ] `baseline/single_agent.py`: one process, fixed rule loop (mine → sell → repeat), no LLM, no A2A.
-- [ ] Run it on a practice pilot for a fixed window; compare against MAS on same window:
-      credits/hour, ore, AU, errors recovered, LLM calls. Table goes into the report.
+### Phase 6+7 — Practice, drills, baseline, deliverables (everything that does NOT need the real pilots)
+Minimal version, built together because time is short. Run on the practice pilot.
+- [~] Failure-drill runbook [docs/DRILLS.md](docs/DRILLS.md): smoke run, kill worker, kill coordinator,
+      missing worker, invalid params, session expiry, stale observations.
+- [~] Baseline `baseline/single_agent.py`: one process, no A2A, no LLM, fixed script, same skills.
+- [~] Comparison/summary tool `mas/report.py` (Markdown table from store + events + LLM ledger).
+- [~] `README.md` with architecture diagram, module table, Linux + Windows commands, secret handling.
+- [~] Report skeleton [docs/REPORT.md](docs/REPORT.md).
+- [ ] YOU: offline tests; Phase 5 live smoke run; drills 1–4; one MAS vs baseline comparison (~20 min each).
 
-### Phase 8 — Assessed runs on real pilots (Day 5–7) — *both*
-- [ ] Register `AI26-Gxx-A` and `AI26-Gxx-B` (Nebula) — **once**.
-- [ ] `python -m scripts.runtime start` before each run, `stop` after. Stay under 8 h total.
-- [ ] Early: one jump to an adjacent system per pilot (Systems Explored ≥2), keep total AU low.
-- [ ] Check public profiles after each run; preview with `scripts.platform_score`.
-- [ ] Stop once targets are hit — extra spending/travel can only hurt.
+`[~]` = code written, waiting for your test run.
 
-### Phase 9 — Deliverables (Day 6–7) — *split*
-- [ ] README: exact commands (Windows **and** Linux), config example, safe key setup.
-- [ ] Architecture diagram (agents, A2A tasks, MCP calls, memory).
-- [ ] Report: strategy, real outcomes, baseline comparison, AI-assistant disclosure.
-- [ ] Sanitized logs + LLM usage summary (`scripts/budget.py`).
-- [ ] Public profile URLs + sale evidence.
-- [ ] Demo rehearsal: start MAS → coordinator decision → A2A handoff → MCP call → game change →
-      kill worker → restart → no duplicate. Each member explains every module.
-
----
+### Phase 8 — Real pilots (needs group number) — *both*
+> Pilots registered 2026-11-20 as **AI26-G100-A** and **AI26-G100-B** (nebula; passwords in keyring). Config: `config/mission.assessed.example.json`. Two-pilot rehearsal on practice pilots: `config/mission.rehearsal.example.json`.
+1. [ ] Group number + partner confirmed. Check the dashboard for a pilots-per-account limit.
+2. [ ] Archive dev LLM usage so assessed runs start from zero:
+       `mv logs/budget.sqlite3 logs/budget.dev.sqlite3` (also keep `logs/events.jsonl` → `logs/events.dev.jsonl`).
+3. [x] Register `AI26-Gxx-A` and `AI26-Gxx-B` (nebula) with `python -m mas.explore_cli` → `register …` — once each.
+       No manual gameplay on them afterwards.
+4. [ ] `config/mission.json`: `"pilots": ["AI26-Gxx-A", "AI26-Gxx-B"]`; targets per pilot 1000 cr / 15 ore / 1 sale.
+5. [x] `python -m mas.gateway_smoke --pilot AI26-Gxx-A` (and B) — read-only.
+6. [ ] `python -m scripts.runtime start` → workers + coordinator → `python -m scripts.runtime stop`. Repeat until
+       the combined profile counters reach the targets; stop early (extra spend/travel only hurts).
+7. [ ] Check both public profiles; `python -m scripts.platform_score …` with the combined numbers.
+8. [ ] Fill docs/REPORT.md (outcomes, comparison, drills, budget), export `mas.report` tables, zip the submission
+       (source, requirements, README, report, sanitized logs, budget summary, profile URLs).
+9. [ ] Demo rehearsal: live profiles → start MAS → decision + A2A handoff + MCP call + game change →
+       kill a worker → restart → no duplicate. Each member explains their modules.
 
 ## 3. Target layout
 
